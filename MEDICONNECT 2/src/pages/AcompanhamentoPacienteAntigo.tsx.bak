@@ -1,0 +1,806 @@
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  Calendar,
+  Clock,
+  User,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  LogOut,
+  Eye,
+  Filter,
+} from "lucide-react";
+import consultaService from "../services/consultaService";
+import medicoService from "../services/medicoService";
+import toast from "react-hot-toast";
+import { format, isAfter, isBefore, isToday, addDays } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { useNavigate } from "react-router-dom";
+
+interface Consulta {
+  _id: string;
+  pacienteId: string;
+  medicoId: string;
+  dataHora: string;
+  status: "agendada" | "confirmada" | "realizada" | "cancelada" | "faltou";
+  tipoConsulta: string;
+  motivoConsulta: string;
+  observacoes?: string;
+  resultados?: string;
+  prescricoes?: string;
+  proximaConsulta?: string;
+  criadoEm: string;
+}
+
+interface Medico {
+  _id: string;
+  nome: string;
+  especialidade: string;
+  valorConsulta: number;
+}
+
+interface Paciente {
+  _id: string;
+  nome: string;
+  cpf: string;
+  telefone: string;
+  email: string;
+}
+
+const AcompanhamentoPaciente: React.FC = () => {
+  const [consultas, setConsultas] = useState<Consulta[]>([]);
+  const [medicos, setMedicos] = useState<Medico[]>([]);
+  const [pacienteLogado, setPacienteLogado] = useState<Paciente | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [filtroStatus, setFiltroStatus] = useState<string>("todas");
+  const [filtroPeriodo, setFiltroPeriodo] = useState<string>("todos");
+  const [consultaSelecionada, setConsultaSelecionada] =
+    useState<Consulta | null>(null);
+  const [showDetalhes, setShowDetalhes] = useState(false);
+
+  const navigate = useNavigate();
+
+  // (Effect moved below callback declarations)
+
+  // Mesclar consultas locais do localStorage com as do backend (apenas visual)
+  interface LocalConsultaRaw {
+    id: string;
+    pacienteId: string;
+    medicoId: string;
+    pacienteNome?: string;
+    medicoNome?: string;
+    dataHora: string;
+    tipo?: string;
+    status: string;
+  }
+
+  const mergeConsultasLocais = useCallback(
+    (pacienteId: string, pacienteEmail?: string) => {
+      try {
+        const raw = localStorage.getItem("consultas_local");
+        if (!raw) return;
+        const arr: LocalConsultaRaw[] = JSON.parse(raw);
+        console.log("[mergeConsultasLocais] Filtrando consultas. Procurando:", {
+          pacienteId,
+          pacienteEmail,
+        });
+        console.log(
+          "[mergeConsultasLocais] Total no localStorage:",
+          arr.length
+        );
+        const minhas = arr.filter((c) => {
+          const match =
+            c.pacienteId === pacienteId ||
+            (pacienteEmail && c.pacienteId === pacienteEmail) ||
+            c.pacienteId === pacienteEmail;
+          if (match) {
+            console.log(
+              "[mergeConsultasLocais] Match encontrado:",
+              c.id,
+              c.pacienteId
+            );
+          }
+          return match;
+        });
+        console.log(
+          "[mergeConsultasLocais] Consultas filtradas:",
+          minhas.length
+        );
+        if (!minhas.length) {
+          console.log(
+            "[mergeConsultasLocais] Nenhuma consulta encontrada para este paciente"
+          );
+          return;
+        }
+        setConsultas((prev) => {
+          const existentes = new Set(prev.map((c) => c._id));
+          const extras: Consulta[] = minhas
+            .filter((c) => !existentes.has(c.id))
+            .map((c) => ({
+              _id: c.id,
+              pacienteId: c.pacienteId,
+              medicoId: c.medicoId,
+              dataHora: c.dataHora,
+              status: (c.status as Consulta["status"]) || "agendada",
+              tipoConsulta: c.tipo || "",
+              motivoConsulta: "",
+              criadoEm: c.dataHora,
+            }));
+          console.log(
+            "[mergeConsultasLocais] Adicionando",
+            extras.length,
+            "consultas ao estado"
+          );
+          return [...prev, ...extras];
+        });
+      } catch {
+        /* ignore */
+      }
+    },
+    []
+  );
+
+  // Carrega e injeta consultas de demonstração automaticamente se ainda não presentes
+  const ensureDemoConsultas = useCallback(
+    async (pacienteId: string, pacienteEmail?: string) => {
+      try {
+        const rawLocal = localStorage.getItem("consultas_local");
+        const existentes: LocalConsultaRaw[] = rawLocal
+          ? JSON.parse(rawLocal)
+          : [];
+        const jaTem = existentes.some(
+          (c) =>
+            c.pacienteId === pacienteId ||
+            (pacienteEmail && c.pacienteId === pacienteEmail)
+        );
+        if (!jaTem) {
+          const resp = await fetch("/src/data/consultas-demo.json").catch(() =>
+            Promise.resolve(undefined)
+          );
+          if (resp && resp.ok) {
+            const demo: LocalConsultaRaw[] = await resp.json();
+            const candidatos = demo.filter(
+              (c) =>
+                c.pacienteId === pacienteId ||
+                (pacienteEmail && c.pacienteId === pacienteEmail)
+            );
+            if (candidatos.length) {
+              const idsExist = new Set(existentes.map((c) => c.id));
+              const novos = candidatos.filter((c) => !idsExist.has(c.id));
+              if (novos.length) {
+                localStorage.setItem(
+                  "consultas_local",
+                  JSON.stringify([...existentes, ...novos])
+                );
+              }
+            }
+          }
+        }
+        mergeConsultasLocais(pacienteId, pacienteEmail);
+      } catch (e) {
+        console.error("Erro ao carregar consultas de demonstração:", e);
+      }
+    },
+    [mergeConsultasLocais]
+  ); // Efetua carregamento inicial após definição das callbacks
+  useEffect(() => {
+    const pacienteData = localStorage.getItem("pacienteLogado");
+    if (!pacienteData) {
+      navigate("/paciente");
+      return;
+    }
+    try {
+      const paciente = JSON.parse(pacienteData);
+      setPacienteLogado(paciente);
+      fetchConsultas(paciente._id);
+      ensureDemoConsultas(paciente._id, paciente.email);
+      fetchMedicos();
+    } catch (error) {
+      console.error("Erro ao carregar dados do paciente:", error);
+      navigate("/paciente");
+    }
+  }, [navigate, ensureDemoConsultas]);
+
+  const fetchConsultas = async (pacienteId: string) => {
+    try {
+      const response = await consultaService.listarConsultas({
+        paciente_id: pacienteId,
+      });
+      const list = response.data?.data || [];
+      const mapped: Consulta[] = list.map((c) => ({
+        _id: c.id || Math.random().toString(36).slice(2, 9),
+        pacienteId: c.paciente_id || "",
+        medicoId: c.medico_id || "",
+        dataHora: c.data_hora || new Date().toISOString(),
+        status: c.status || "agendada",
+        tipoConsulta: c.tipo_consulta || "",
+        motivoConsulta: c.motivo_consulta || "",
+        observacoes: c.observacoes,
+        resultados: "",
+        prescricoes: "",
+        proximaConsulta: "",
+        criadoEm: c.created_at || new Date().toISOString(),
+      }));
+      setConsultas(mapped);
+    } catch (error) {
+      console.error("Erro ao carregar consultas:", error);
+      toast.error("Erro ao carregar suas consultas");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchMedicos = async () => {
+    try {
+      const response = await medicoService.listarMedicos();
+      const list = response.data?.data || [];
+      const mapped: Medico[] = list.map((m) => ({
+        _id: m.id || Math.random().toString(36).slice(2, 9),
+        nome: m.nome || "",
+        especialidade: m.especialidade || "",
+        valorConsulta: 0,
+      }));
+      setMedicos(mapped);
+    } catch (error) {
+      console.error("Erro ao carregar médicos:", error);
+    }
+  };
+
+  const getMedicoNome = (medicoId: string) => {
+    const medico = medicos.find((m) => m._id === medicoId);
+    return medico ? medico.nome : "Médico não encontrado";
+  };
+
+  const getMedicoEspecialidade = (medicoId: string) => {
+    const medico = medicos.find((m) => m._id === medicoId);
+    return medico ? medico.especialidade : "";
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "agendada":
+        return "bg-blue-100 text-blue-800";
+      case "confirmada":
+        return "bg-green-100 text-green-800";
+      case "realizada":
+        return "bg-gray-100 text-gray-800";
+      case "cancelada":
+        return "bg-red-100 text-red-800";
+      case "faltou":
+        return "bg-orange-100 text-orange-800";
+      default:
+        return "bg-gray-100 text-gray-800";
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case "agendada":
+        return <Clock className="w-4 h-4" />;
+      case "confirmada":
+        return <CheckCircle className="w-4 h-4" />;
+      case "realizada":
+        return <CheckCircle className="w-4 h-4" />;
+      case "cancelada":
+        return <XCircle className="w-4 h-4" />;
+      case "faltou":
+        return <AlertCircle className="w-4 h-4" />;
+      default:
+        return <Clock className="w-4 h-4" />;
+    }
+  };
+
+  const getStatusTexto = (status: string) => {
+    switch (status) {
+      case "agendada":
+        return "Agendada";
+      case "confirmada":
+        return "Confirmada";
+      case "realizada":
+        return "Realizada";
+      case "cancelada":
+        return "Cancelada";
+      case "faltou":
+        return "Faltou";
+      default:
+        return status;
+    }
+  };
+
+  const filtrarConsultas = () => {
+    let consultasFiltradas = [...consultas];
+
+    // Filtro por status
+    if (filtroStatus !== "todas") {
+      consultasFiltradas = consultasFiltradas.filter(
+        (c) => c.status === filtroStatus
+      );
+    }
+
+    // Filtro por período
+    const hoje = new Date();
+    switch (filtroPeriodo) {
+      case "proximas":
+        consultasFiltradas = consultasFiltradas.filter(
+          (c) =>
+            isAfter(new Date(c.dataHora), hoje) &&
+            (c.status === "agendada" || c.status === "confirmada")
+        );
+        break;
+      case "hoje":
+        consultasFiltradas = consultasFiltradas.filter((c) =>
+          isToday(new Date(c.dataHora))
+        );
+        break;
+      case "semana":
+        {
+          const proximaSemana = addDays(hoje, 7);
+          consultasFiltradas = consultasFiltradas.filter(
+            (c) =>
+              isAfter(new Date(c.dataHora), hoje) &&
+              isBefore(new Date(c.dataHora), proximaSemana)
+          );
+        }
+        break;
+      case "historico":
+        consultasFiltradas = consultasFiltradas.filter((c) =>
+          isBefore(new Date(c.dataHora), hoje)
+        );
+        break;
+    }
+
+    return consultasFiltradas;
+  };
+
+  const abrirDetalhes = (consulta: Consulta) => {
+    setConsultaSelecionada(consulta);
+    setShowDetalhes(true);
+  };
+
+  const fecharDetalhes = () => {
+    setConsultaSelecionada(null);
+    setShowDetalhes(false);
+  };
+
+  const novoAgendamento = () => {
+    navigate("/agendamento");
+  };
+
+  const logout = () => {
+    localStorage.removeItem("pacienteLogado");
+    navigate("/paciente");
+  };
+
+  if (!pacienteLogado) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  const consultasFiltradas = filtrarConsultas();
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-6">
+      {/* Header com Gradiente Aprimorado */}
+      <div className="bg-gradient-to-r from-blue-700 via-blue-600 to-blue-500 dark:from-blue-800 dark:via-blue-700 dark:to-blue-600 rounded-xl shadow-lg p-8">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+          <div className="text-white">
+            <h1 className="text-4xl font-bold mb-2">
+              Olá, {pacienteLogado.nome}!
+            </h1>
+            <p className="text-blue-100 text-lg">
+              Gerencie suas consultas e acompanhe seu histórico médico
+            </p>
+            <div className="flex items-center gap-4 mt-3 text-sm text-blue-200">
+              <div className="flex items-center gap-1">
+                <User className="w-4 h-4" />
+                <span>Paciente</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Calendar className="w-4 h-4" />
+                <span>{consultas.length} consultas registradas</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-3 w-full md:w-auto">
+            <button
+              onClick={novoAgendamento}
+              className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-white hover:bg-blue-50 text-blue-700 px-6 py-3 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2"
+            >
+              <Calendar className="w-5 h-5" />
+              <span>Nova Consulta</span>
+            </button>
+            <button
+              onClick={logout}
+              className="flex items-center justify-center gap-2 bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-6 py-3 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2"
+            >
+              <LogOut className="w-5 h-5" />
+              <span>Sair</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Cards de Estatísticas */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                Total
+              </p>
+              <p className="text-3xl font-bold text-gray-900 dark:text-white mt-2">
+                {consultas.length}
+              </p>
+            </div>
+            <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded-lg">
+              <Calendar className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                Agendadas
+              </p>
+              <p className="text-3xl font-bold text-blue-600 dark:text-blue-400 mt-2">
+                {consultas.filter((c) => c.status === "agendada").length}
+              </p>
+            </div>
+            <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded-lg">
+              <Clock className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                Realizadas
+              </p>
+              <p className="text-3xl font-bold text-green-600 dark:text-green-400 mt-2">
+                {consultas.filter((c) => c.status === "realizada").length}
+              </p>
+            </div>
+            <div className="bg-green-100 dark:bg-green-900/30 p-3 rounded-lg">
+              <CheckCircle className="w-8 h-8 text-green-600 dark:text-green-400" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                Canceladas
+              </p>
+              <p className="text-3xl font-bold text-red-600 dark:text-red-400 mt-2">
+                {consultas.filter((c) => c.status === "cancelada").length}
+              </p>
+            </div>
+            <div className="bg-red-100 dark:bg-red-900/30 p-3 rounded-lg">
+              <XCircle className="w-8 h-8 text-red-600 dark:text-red-400" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filtros */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-lg">
+            <Filter className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+            Filtrar Consultas
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Status da Consulta
+            </label>
+            <select
+              value={filtroStatus}
+              onChange={(e) => setFiltroStatus(e.target.value)}
+              className="form-input"
+            >
+              <option value="todas">Todas</option>
+              <option value="agendada">Agendadas</option>
+              <option value="confirmada">Confirmadas</option>
+              <option value="realizada">Realizadas</option>
+              <option value="cancelada">Canceladas</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Período
+            </label>
+            <select
+              value={filtroPeriodo}
+              onChange={(e) => setFiltroPeriodo(e.target.value)}
+              className="form-input"
+            >
+              <option value="todos">Todos</option>
+              <option value="proximas">Próximas</option>
+              <option value="hoje">Hoje</option>
+              <option value="semana">Próximos 7 dias</option>
+              <option value="historico">Histórico</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Lista de Consultas */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700">
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+              Suas Consultas
+            </h2>
+            <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 text-sm font-medium px-3 py-1 rounded-full">
+              {consultasFiltradas.length}{" "}
+              {consultasFiltradas.length === 1 ? "consulta" : "consultas"}
+            </span>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center items-center p-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          </div>
+        ) : consultasFiltradas.length === 0 ? (
+          <div className="text-center p-12">
+            <div className="bg-gray-100 dark:bg-gray-700/30 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Calendar className="w-10 h-10 text-gray-400 dark:text-gray-500" />
+            </div>
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+              Nenhuma consulta encontrada
+            </h3>
+            <p className="text-gray-500 dark:text-gray-400 mb-6 max-w-md mx-auto">
+              {filtroStatus !== "todas" || filtroPeriodo !== "todos"
+                ? "Tente ajustar os filtros para ver mais consultas."
+                : "Você ainda não tem consultas agendadas."}
+            </p>
+            <button
+              onClick={novoAgendamento}
+              className="btn-primary inline-flex items-center gap-2"
+            >
+              <Calendar className="w-4 h-4" />
+              Agendar Primeira Consulta
+            </button>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-200 dark:divide-gray-700">
+            {consultasFiltradas.map((consulta) => (
+              <div
+                key={consulta._id}
+                className="p-6 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-4 mb-2">
+                      <span
+                        className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
+                          consulta.status
+                        )}`}
+                      >
+                        {getStatusIcon(consulta.status)}
+                        <span>{getStatusTexto(consulta.status)}</span>
+                      </span>
+                      <span className="text-sm text-gray-500">
+                        {consulta.tipoConsulta}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="flex items-center space-x-2">
+                        <User className="w-4 h-4 text-gray-400" />
+                        <div>
+                          <p className="font-medium text-gray-900">
+                            {getMedicoNome(consulta.medicoId)}
+                          </p>
+                          <p className="text-sm text-gray-500">
+                            {getMedicoEspecialidade(consulta.medicoId)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        <Calendar className="w-4 h-4 text-gray-400" />
+                        <div>
+                          <p className="font-medium text-gray-900">
+                            {format(new Date(consulta.dataHora), "dd/MM/yyyy", {
+                              locale: ptBR,
+                            })}
+                          </p>
+                          <p className="text-sm text-gray-500">
+                            {format(new Date(consulta.dataHora), "EEEE", {
+                              locale: ptBR,
+                            })}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        <Clock className="w-4 h-4 text-gray-400" />
+                        <div>
+                          <p className="font-medium text-gray-900">
+                            {format(new Date(consulta.dataHora), "HH:mm")}
+                          </p>
+                          <p className="text-sm text-gray-500">
+                            {consulta.motivoConsulta || "Consulta de rotina"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => abrirDetalhes(consulta)}
+                    className="ml-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                    aria-label="Ver detalhes da consulta"
+                  >
+                    <Eye className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Modal de Detalhes */}
+      {showDetalhes && consultaSelecionada && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="detalhes-consulta-title"
+        >
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex justify-between items-center">
+                <h3
+                  id="detalhes-consulta-title"
+                  className="text-lg font-semibold"
+                >
+                  Detalhes da Consulta
+                </h3>
+                <button
+                  onClick={fecharDetalhes}
+                  aria-label="Fechar detalhes da consulta"
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-300 focus-visible:ring-offset-2"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* Informações Básicas */}
+              <div>
+                <h4 className="font-semibold mb-3">Informações da Consulta</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-gray-500">Médico:</span>
+                    <p className="font-medium">
+                      {getMedicoNome(consultaSelecionada.medicoId)}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Especialidade:</span>
+                    <p className="font-medium">
+                      {getMedicoEspecialidade(consultaSelecionada.medicoId)}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Data:</span>
+                    <p className="font-medium">
+                      {format(
+                        new Date(consultaSelecionada.dataHora),
+                        "dd/MM/yyyy - HH:mm",
+                        { locale: ptBR }
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Status:</span>
+                    <span
+                      className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
+                        consultaSelecionada.status
+                      )}`}
+                    >
+                      {getStatusIcon(consultaSelecionada.status)}
+                      <span>{getStatusTexto(consultaSelecionada.status)}</span>
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Tipo:</span>
+                    <p className="font-medium">
+                      {consultaSelecionada.tipoConsulta}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Motivo da Consulta */}
+              {consultaSelecionada.motivoConsulta && (
+                <div>
+                  <h4 className="font-semibold mb-2">Motivo da Consulta</h4>
+                  <p className="text-gray-700 bg-gray-50 p-3 rounded-lg">
+                    {consultaSelecionada.motivoConsulta}
+                  </p>
+                </div>
+              )}
+
+              {/* Observações */}
+              {consultaSelecionada.observacoes && (
+                <div>
+                  <h4 className="font-semibold mb-2">Observações</h4>
+                  <p className="text-gray-700 bg-gray-50 p-3 rounded-lg">
+                    {consultaSelecionada.observacoes}
+                  </p>
+                </div>
+              )}
+
+              {/* Resultados (só aparece se a consulta foi realizada) */}
+              {consultaSelecionada.status === "realizada" &&
+                consultaSelecionada.resultados && (
+                  <div>
+                    <h4 className="font-semibold mb-2">
+                      Resultados da Consulta
+                    </h4>
+                    <p className="text-gray-700 bg-green-50 p-3 rounded-lg border-l-4 border-green-400">
+                      {consultaSelecionada.resultados}
+                    </p>
+                  </div>
+                )}
+
+              {/* Prescrições */}
+              {consultaSelecionada.prescricoes && (
+                <div>
+                  <h4 className="font-semibold mb-2">Prescrições Médicas</h4>
+                  <p className="text-gray-700 bg-blue-50 p-3 rounded-lg border-l-4 border-blue-400">
+                    {consultaSelecionada.prescricoes}
+                  </p>
+                </div>
+              )}
+
+              {/* Próxima Consulta */}
+              {consultaSelecionada.proximaConsulta && (
+                <div>
+                  <h4 className="font-semibold mb-2">
+                    Próxima Consulta Recomendada
+                  </h4>
+                  <p className="text-gray-700 bg-yellow-50 p-3 rounded-lg border-l-4 border-yellow-400">
+                    {consultaSelecionada.proximaConsulta}
+                  </p>
+                </div>
+              )}
+
+              {/* Data de Criação */}
+              <div className="text-xs text-gray-500 pt-4 border-t">
+                Agendado em:{" "}
+                {format(
+                  new Date(consultaSelecionada.criadoEm),
+                  "dd/MM/yyyy às HH:mm",
+                  { locale: ptBR }
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AcompanhamentoPaciente;

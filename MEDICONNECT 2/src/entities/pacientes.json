@@ -1,0 +1,77 @@
+{
+  "name": "pacientes",
+  "fields": [
+    {
+      "name": "nome",
+      "type": "string",
+      "required": true,
+      "title": "Nome Completo"
+    },
+    {
+      "name": "email",
+      "type": "string",
+      "required": true,
+      "title": "Email"
+    },
+    {
+      "name": "senha",
+      "type": "string",
+      "required": true,
+      "title": "Senha"
+    },
+    {
+      "name": "telefone",
+      "type": "string",
+      "required": true,
+      "title": "Telefone"
+    },
+    {
+      "name": "cpf",
+      "type": "string",
+      "required": true,
+      "title": "CPF"
+    },
+    {
+      "name": "dataNascimento",
+      "type": "string",
+      "title": "datetime",
+      "required": true
+    },
+    {
+      "name": "convenio",
+      "type": "string",
+      "title": "Convênio"
+    },
+    {
+      "name": "altura",
+      "type": "number",
+      "title": "Altura (cm)"
+    },
+    {
+      "name": "peso",
+      "type": "number",
+      "title": "Peso (kg)"
+    },
+    {
+      "name": "observacoes",
+      "type": "string",
+      "title": "Observações"
+    },
+    {
+      "name": "ativo",
+      "type": "boolean",
+      "title": "Ativo",
+      "default": true
+    },
+    {
+      "name": "criadoEm",
+      "type": "string",
+      "title": "datetime"
+    },
+    {
+      "name": "atualizadoEm",
+      "type": "string",
+      "title": "datetime"
+    }
+  ]
+}

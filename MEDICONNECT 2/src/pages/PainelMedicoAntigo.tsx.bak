@@ -1,0 +1,759 @@
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  Calendar,
+  Clock,
+  CheckCircle,
+  AlertCircle,
+  FileText,
+  X,
+} from "lucide-react";
+import toast from "react-hot-toast";
+import { format } from "date-fns";
+import { useNavigate } from "react-router-dom";
+import ConsultationList from "../components/consultas/ConsultationList";
+import ConsultaModal from "../components/consultas/ConsultaModal";
+import AvailabilityManager from "../components/agenda/AvailabilityManager";
+import ExceptionsManager from "../components/agenda/ExceptionsManager";
+import consultasService, {
+  Consulta as ServiceConsulta,
+} from "../services/consultasService";
+import { listPatients } from "../services/pacienteService";
+import { useAuth } from "../hooks/useAuth";
+import relatorioService, {
+  RelatorioCreate,
+} from "../services/relatorioService";
+
+interface ConsultaUI {
+  id: string;
+  pacienteId: string;
+  medicoId: string;
+  pacienteNome: string;
+  medicoNome: string;
+  dataHora: string;
+  status: string;
+  tipo?: string;
+  observacoes?: string;
+}
+
+interface Paciente {
+  _id: string;
+  nome: string;
+  telefone: string;
+  email: string;
+  convenio: string;
+  observacoes: string;
+}
+
+// Tipo Medico original removido (não necessário após auth)
+
+// Antigos tipos Lumi removidos (não usados nesta refatoração)
+
+const PainelMedico: React.FC = () => {
+  const { user, roles } = useAuth();
+  // Permite acesso se for médico ou admin
+  const temAcessoMedico =
+    user &&
+    (user.role === "medico" ||
+      roles.includes("medico") ||
+      roles.includes("admin"));
+  const medicoId = temAcessoMedico ? user.id : "";
+  const medicoNome = user?.nome || "Médico";
+  const [consultas, setConsultas] = useState<ConsultaUI[]>([]);
+  // pacientes detalhados não utilizados nesta versão simplificada
+  const [filtroData, setFiltroData] = useState("hoje");
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<ConsultaUI | null>(null);
+  const [relatorioModalOpen, setRelatorioModalOpen] = useState(false);
+  const [loadingRelatorio, setLoadingRelatorio] = useState(false);
+  const [pacientesDisponiveis, setPacientesDisponiveis] = useState<
+    Array<{ id: string; nome: string }>
+  >([]);
+  const [formRelatorio, setFormRelatorio] = useState({
+    patient_id: "",
+    order_number: "",
+    exam: "",
+    diagnosis: "",
+    conclusion: "",
+    cid_code: "",
+    content_html: "",
+    status: "draft" as "draft" | "pending" | "completed" | "cancelled",
+    requested_by: medicoNome,
+    due_at: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+    hide_date: false,
+    hide_signature: false,
+  });
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!medicoId) navigate("/login-medico");
+  }, [medicoId, navigate]);
+
+  const fetchConsultas = useCallback(async () => {
+    if (!medicoId) return;
+    setLoading(true);
+    try {
+      const raw = localStorage.getItem("consultas_local");
+      let lista: ServiceConsulta[] = [];
+      if (raw) {
+        try {
+          lista = JSON.parse(raw);
+        } catch {
+          lista = [];
+        }
+      }
+      let filtradas = lista.filter((c) => c.medicoId === medicoId);
+      const hoje = new Date();
+      if (filtroData === "hoje") {
+        const dStr = format(hoje, "yyyy-MM-dd");
+        filtradas = filtradas.filter((c) => c.dataHora.startsWith(dStr));
+      } else if (filtroData === "amanha") {
+        const amanha = new Date(hoje);
+        amanha.setDate(hoje.getDate() + 1);
+        const dStr = format(amanha, "yyyy-MM-dd");
+        filtradas = filtradas.filter((c) => c.dataHora.startsWith(dStr));
+      } else if (filtroData === "semana") {
+        const start = new Date(hoje);
+        start.setDate(hoje.getDate() - hoje.getDay());
+        const end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        filtradas = filtradas.filter((c) => {
+          const d = new Date(c.dataHora);
+          return d >= start && d <= end;
+        });
+      }
+      const pacientesResponse = await listPatients({ per_page: 200 }).catch(
+        () => ({ data: [], total: 0, page: 1, per_page: 0 })
+      );
+      const pacMap: Record<string, Paciente> = {};
+      const pacientesLista =
+        "data" in pacientesResponse ? pacientesResponse.data : [];
+      pacientesLista.forEach((p) => {
+        pacMap[p.id] = {
+          _id: p.id,
+          nome: p.nome,
+          telefone: p.telefone || "",
+          email: p.email || "",
+          convenio: p.convenio || "",
+          observacoes: p.observacoes || "",
+        };
+      });
+      setConsultas(
+        filtradas.map((c) => ({
+          id: c.id,
+          pacienteId: c.pacienteId,
+          medicoId: c.medicoId,
+          pacienteNome: pacMap[c.pacienteId]?.nome || c.pacienteId,
+          medicoNome: medicoNome,
+          dataHora: c.dataHora,
+          status: c.status,
+          tipo: c.tipo,
+          observacoes: c.observacoes,
+        }))
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [medicoId, filtroData, medicoNome]);
+
+  useEffect(() => {
+    fetchConsultas();
+  }, [fetchConsultas]);
+
+  // Carregar pacientes quando o modal de relatório abrir
+  useEffect(() => {
+    if (relatorioModalOpen && user?.id) {
+      const carregarPacientes = async () => {
+        try {
+          // Temporariamente buscando todos os pacientes para demonstração
+          const response = await listPatients({
+            per_page: 200,
+            // Filtro por médico removido temporariamente
+          });
+          if ("data" in response) {
+            setPacientesDisponiveis(
+              response.data.map((p) => ({
+                id: p.id,
+                nome: p.nome,
+              }))
+            );
+
+            if (response.data.length === 0) {
+              toast("Nenhum paciente encontrado no sistema", {
+                icon: "ℹ️",
+              });
+            } else {
+              console.log(
+                `✅ ${response.data.length} pacientes atribuídos carregados`
+              );
+            }
+          }
+        } catch (error) {
+          console.error("Erro ao carregar pacientes:", error);
+          toast.error("Erro ao carregar lista de pacientes");
+        }
+      };
+      carregarPacientes();
+    }
+  }, [relatorioModalOpen, user]);
+
+  // Removido: listagem de todos os médicos; painel bloqueado ao médico logado
+
+  // fetchConsultas substitui bloco anterior
+
+  const atualizarStatusConsulta = async (id: string, status: string) => {
+    try {
+      const resp = await consultasService.atualizar(id, { status });
+      if (resp.success && resp.data) {
+        setConsultas((prev) =>
+          prev.map((c) =>
+            c.id === id ? { ...c, status: resp.data!.status } : c
+          )
+        );
+        // persist back
+        try {
+          const raw = localStorage.getItem("consultas_local");
+          if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) {
+              const upd = arr.map((x: Record<string, unknown>) =>
+                x && x.id === id ? { ...x, status: resp.data!.status } : x
+              );
+              localStorage.setItem("consultas_local", JSON.stringify(upd));
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+        toast.success("Status atualizado");
+      } else toast.error(resp.error || "Falha ao atualizar");
+    } catch {
+      toast.error("Erro ao atualizar status");
+    }
+  };
+
+  const handleSubmitRelatorio = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!formRelatorio.patient_id) {
+      toast.error("Selecione um paciente");
+      return;
+    }
+
+    setLoadingRelatorio(true);
+
+    try {
+      // Gerar número do relatório automaticamente
+      const orderNumber = `REL-${format(new Date(), "yyyy-MM")}-${Math.random()
+        .toString(36)
+        .substr(2, 6)
+        .toUpperCase()}`;
+
+      const relatorioData: RelatorioCreate = {
+        patient_id: formRelatorio.patient_id,
+        order_number: formRelatorio.order_number || orderNumber,
+        exam: formRelatorio.exam,
+        diagnosis: formRelatorio.diagnosis,
+        conclusion: formRelatorio.conclusion,
+        cid_code: formRelatorio.cid_code || undefined,
+        content_html:
+          formRelatorio.content_html ||
+          `<div>
+          <h2>${formRelatorio.exam}</h2>
+          <h3>Diagnóstico:</h3>
+          <p>${formRelatorio.diagnosis}</p>
+          <h3>Conclusão:</h3>
+          <p>${formRelatorio.conclusion}</p>
+        </div>`,
+        status: formRelatorio.status,
+        requested_by: formRelatorio.requested_by || medicoNome,
+        due_at: formRelatorio.due_at
+          ? new Date(formRelatorio.due_at).toISOString()
+          : undefined,
+        hide_date: formRelatorio.hide_date,
+        hide_signature: formRelatorio.hide_signature,
+      };
+
+      const response = await relatorioService.criarRelatorio(relatorioData);
+
+      if (response.success) {
+        toast.success("Relatório criado com sucesso!");
+        setRelatorioModalOpen(false);
+        // Reset form
+        setFormRelatorio({
+          patient_id: "",
+          order_number: "",
+          exam: "",
+          diagnosis: "",
+          conclusion: "",
+          cid_code: "",
+          content_html: "",
+          status: "draft",
+          requested_by: medicoNome,
+          due_at: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+          hide_date: false,
+          hide_signature: false,
+        });
+      } else {
+        toast.error(response.error || "Erro ao criar relatório");
+      }
+    } catch (error) {
+      console.error("Erro ao criar relatório:", error);
+      toast.error("Erro ao criar relatório");
+    } finally {
+      setLoadingRelatorio(false);
+    }
+  };
+
+  // salvarConsulta substituído por onSaved direto no modal
+
+  return (
+    <div className="space-y-6">
+      {/* Header com Gradiente */}
+      <div className="bg-gradient-to-r from-blue-700 via-blue-600 to-blue-500 dark:from-blue-800 dark:via-blue-700 dark:to-blue-600 rounded-xl shadow-lg p-8">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between">
+          <div className="text-white">
+            <h1 className="text-4xl font-bold mb-2">Painel do Médico</h1>
+            <p className="text-blue-100 text-lg">
+              Bem-vindo, Dr(a). {medicoNome}
+            </p>
+            <p className="text-blue-200 text-sm mt-1">
+              Gerencie suas consultas e agenda
+            </p>
+          </div>
+
+          <div className="flex flex-col md:flex-row gap-4 mt-6 md:mt-0">
+            <button
+              onClick={() => setRelatorioModalOpen(true)}
+              className="flex items-center justify-center gap-2 bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-6 py-3 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2"
+            >
+              <FileText className="w-5 h-5" />
+              <span>Criar Relatório</span>
+            </button>
+            <button
+              onClick={() => setModalOpen(true)}
+              className="flex items-center justify-center gap-2 bg-white hover:bg-blue-50 text-blue-700 px-6 py-3 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+            >
+              <Calendar className="w-5 h-5" />
+              <span>Nova Consulta</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Cards de Estatísticas */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                Total de Consultas
+              </p>
+              <p className="text-3xl font-bold text-gray-900 dark:text-white mt-2">
+                {consultas.length}
+              </p>
+            </div>
+            <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded-lg">
+              <Calendar className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                Confirmadas
+              </p>
+              <p className="text-3xl font-bold text-green-600 dark:text-green-400 mt-2">
+                {consultas.filter((c) => c.status === "confirmada").length}
+              </p>
+            </div>
+            <div className="bg-green-100 dark:bg-green-900/30 p-3 rounded-lg">
+              <CheckCircle className="w-8 h-8 text-green-600 dark:text-green-400" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                Pendentes
+              </p>
+              <p className="text-3xl font-bold text-yellow-600 dark:text-yellow-400 mt-2">
+                {consultas.filter((c) => c.status === "agendada").length}
+              </p>
+            </div>
+            <div className="bg-yellow-100 dark:bg-yellow-900/30 p-3 rounded-lg">
+              <Clock className="w-8 h-8 text-yellow-600 dark:text-yellow-400" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filtros e Ações */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700">
+        <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+            Suas Consultas
+          </h2>
+
+          <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
+            <select
+              value={filtroData}
+              onChange={(e) => setFiltroData(e.target.value)}
+              className="form-input min-w-[200px] focus:ring-2 focus:ring-blue-600 focus:border-blue-600/40"
+            >
+              <option value="hoje">Hoje</option>
+              <option value="amanha">Amanhã</option>
+              <option value="semana">Esta Semana</option>
+              <option value="todas">Todas</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Gestão de Agenda do Médico */}
+      {temAcessoMedico && medicoId && (
+        <div className="space-y-6">
+          <AvailabilityManager doctorId={medicoId} />
+          <ExceptionsManager doctorId={medicoId} />
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+        </div>
+      ) : (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Lista de Consultas
+            </h3>
+          </div>
+          <ConsultationList
+            itens={consultas.map((c) => ({
+              id: c.id,
+              dataHora: c.dataHora,
+              pacienteNome: c.pacienteNome,
+              medicoNome: c.medicoNome,
+              status: c.status,
+              tipo: c.tipo,
+              observacoes: c.observacoes,
+            }))}
+            loading={false}
+            showPaciente
+            showMedico={false}
+            allowDelete={false}
+            onChangeStatus={(id, st) => atualizarStatusConsulta(id, st)}
+            onEdit={(id) => {
+              const found = consultas.find((c) => c.id === id) || null;
+              setEditing(found);
+              setModalOpen(true);
+            }}
+          />
+          {consultas.length === 0 && (
+            <div className="text-center py-8 text-sm text-gray-500">
+              <AlertCircle className="w-6 h-6 mx-auto mb-2 text-gray-400" />
+              Nenhuma consulta encontrada para o período.
+            </div>
+          )}
+        </div>
+      )}
+      <ConsultaModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        editing={
+          editing
+            ? ({
+                id: editing.id,
+                pacienteId: editing.pacienteId,
+                medicoId: editing.medicoId,
+                dataHora: editing.dataHora,
+                status: editing.status,
+                tipo: editing.tipo,
+              } as {
+                id: string;
+                pacienteId: string;
+                medicoId: string;
+                dataHora: string;
+                status: string;
+                tipo?: string;
+              })
+            : null
+        }
+        onSaved={() => {
+          setModalOpen(false);
+          fetchConsultas();
+        }}
+        defaultMedicoId={medicoId}
+        lockMedico
+      />
+
+      {/* Modal de Novo Relatório */}
+      {relatorioModalOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="novo-relatorio-title"
+        >
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto outline-none focus:outline-none">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2
+                  id="novo-relatorio-title"
+                  className="text-2xl font-bold text-gray-900"
+                >
+                  Novo Relatório
+                </h2>
+                <button
+                  onClick={() => setRelatorioModalOpen(false)}
+                  aria-label="Fechar modal de novo relatório"
+                  className="text-gray-400 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-300 focus-visible:ring-offset-2 rounded"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmitRelatorio} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Paciente *
+                  </label>
+                  <select
+                    value={formRelatorio.patient_id}
+                    onChange={(e) =>
+                      setFormRelatorio({
+                        ...formRelatorio,
+                        patient_id: e.target.value,
+                      })
+                    }
+                    className="form-input w-full"
+                    required
+                  >
+                    <option value="">Selecione um paciente</option>
+                    {pacientesDisponiveis.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nome}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Número do Pedido
+                    </label>
+                    <input
+                      type="text"
+                      value={formRelatorio.order_number}
+                      onChange={(e) =>
+                        setFormRelatorio({
+                          ...formRelatorio,
+                          order_number: e.target.value,
+                        })
+                      }
+                      className="form-input w-full"
+                      placeholder="Será gerado automaticamente"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Status *
+                    </label>
+                    <select
+                      value={formRelatorio.status}
+                      onChange={(e) =>
+                        setFormRelatorio({
+                          ...formRelatorio,
+                          status: e.target.value as
+                            | "draft"
+                            | "pending"
+                            | "completed"
+                            | "cancelled",
+                        })
+                      }
+                      className="form-input w-full"
+                      required
+                    >
+                      <option value="draft">Rascunho</option>
+                      <option value="pending">Pendente</option>
+                      <option value="completed">Concluído</option>
+                      <option value="cancelled">Cancelado</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Exame/Procedimento *
+                  </label>
+                  <input
+                    type="text"
+                    value={formRelatorio.exam}
+                    onChange={(e) =>
+                      setFormRelatorio({
+                        ...formRelatorio,
+                        exam: e.target.value,
+                      })
+                    }
+                    className="form-input w-full"
+                    placeholder="Ex: Radiografia de Tórax, Ultrassom Abdominal"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Diagnóstico *
+                  </label>
+                  <textarea
+                    value={formRelatorio.diagnosis}
+                    onChange={(e) =>
+                      setFormRelatorio({
+                        ...formRelatorio,
+                        diagnosis: e.target.value,
+                      })
+                    }
+                    className="form-input w-full"
+                    rows={3}
+                    placeholder="Descreva o diagnóstico"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Conclusão *
+                  </label>
+                  <textarea
+                    value={formRelatorio.conclusion}
+                    onChange={(e) =>
+                      setFormRelatorio({
+                        ...formRelatorio,
+                        conclusion: e.target.value,
+                      })
+                    }
+                    className="form-input w-full"
+                    rows={3}
+                    placeholder="Conclusão do exame/relatório"
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Código CID
+                    </label>
+                    <input
+                      type="text"
+                      value={formRelatorio.cid_code}
+                      onChange={(e) =>
+                        setFormRelatorio({
+                          ...formRelatorio,
+                          cid_code: e.target.value,
+                        })
+                      }
+                      className="form-input w-full"
+                      placeholder="Ex: Z01.7, J00.0"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Data de Vencimento
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={formRelatorio.due_at}
+                      onChange={(e) =>
+                        setFormRelatorio({
+                          ...formRelatorio,
+                          due_at: e.target.value,
+                        })
+                      }
+                      className="form-input w-full"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={formRelatorio.hide_date}
+                      onChange={(e) =>
+                        setFormRelatorio({
+                          ...formRelatorio,
+                          hide_date: e.target.checked,
+                        })
+                      }
+                      className="form-checkbox"
+                    />
+                    <span className="text-sm text-gray-700">
+                      Ocultar data no relatório
+                    </span>
+                  </label>
+
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={formRelatorio.hide_signature}
+                      onChange={(e) =>
+                        setFormRelatorio({
+                          ...formRelatorio,
+                          hide_signature: e.target.checked,
+                        })
+                      }
+                      className="form-checkbox"
+                    />
+                    <span className="text-sm text-gray-700">
+                      Ocultar assinatura
+                    </span>
+                  </label>
+                </div>
+
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-sm text-blue-800">
+                    <strong>Solicitado por:</strong> {medicoNome}
+                  </p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    Este relatório será associado ao médico logado
+                  </p>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setRelatorioModalOpen(false)}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                    disabled={loadingRelatorio}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                    disabled={loadingRelatorio}
+                  >
+                    {loadingRelatorio ? "Gerando..." : "Gerar Relatório"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Observações agora integradas ao fluxo de edição no modal */}
+    </div>
+  );
+};
+
+export default PainelMedico;

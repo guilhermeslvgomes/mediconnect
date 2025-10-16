@@ -1,0 +1,85 @@
+
+{
+  "name": "consultas",
+  "fields": [
+    {
+      "name": "pacienteId",
+      "type": "string",
+      "required": true,
+      "title": "ID do Paciente"
+    },
+    {
+      "name": "medicoId", 
+      "type": "string",
+      "required": true,
+      "title": "ID do Médico"
+    },
+    {
+      "name": "dataHora",
+      "type": "string",
+      "required": true,
+      "title": "datetime"
+    },
+    {
+      "name": "status",
+      "type": "string",
+      "required": true,
+      "enum": ["agendada", "confirmada", "realizada", "cancelada", "faltou"],
+      "title": "Status da Consulta"
+    },
+    {
+      "name": "tipoConsulta",
+      "type": "string",
+      "required": true,
+      "enum": ["primeira-vez", "retorno", "urgencia"],
+      "title": "Tipo de Consulta"
+    },
+    {
+      "name": "motivoConsulta",
+      "type": "string",
+      "title": "Motivo da Consulta"
+    },
+    {
+      "name": "observacoes",
+      "type": "string",
+      "title": "Observações"
+    },
+    {
+      "name": "resultados",
+      "type": "string",
+      "title": "Resultados da Consulta"
+    },
+    {
+      "name": "prescricoes",
+      "type": "string",
+      "title": "Prescrições Médicas"
+    },
+    {
+      "name": "proximaConsulta",
+      "type": "string",
+      "title": "Próxima Consulta Recomendada"
+    },
+    {
+      "name": "lembrete",
+      "type": "boolean",
+      "default": false,
+      "title": "Lembrete Enviado"
+    },
+    {
+      "name": "criadoPor",
+      "type": "string",
+      "enum": ["paciente", "secretaria", "medico"],
+      "title": "Criado Por"
+    },
+    {
+      "name": "criadoEm",
+      "type": "string",
+      "title": "datetime"
+    },
+    {
+      "name": "atualizadoEm",
+      "type": "string", 
+      "title": "datetime"
+    }
+  ]
+}

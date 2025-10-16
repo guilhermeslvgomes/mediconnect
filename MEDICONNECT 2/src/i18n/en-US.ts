@@ -1,0 +1,110 @@
+/**
+ * English (US) Translations
+ */
+export const enUS = {
+  common: {
+    skipToContent: "Skip to content",
+    loading: "Loading...",
+    error: "Error",
+    retry: "Try again",
+    cancel: "Cancel",
+    confirm: "Confirm",
+    close: "Close",
+    save: "Save",
+    edit: "Edit",
+    delete: "Delete",
+    search: "Search",
+    filter: "Filter",
+    viewAll: "View all",
+    noData: "No data available",
+  },
+  header: {
+    logo: "MediConnect",
+    subtitle: "Appointment System",
+    home: "Home",
+    login: "Login",
+    logout: "Logout",
+    notAuthenticated: "Not authenticated",
+    profile: "Profile",
+    selectProfile: "Select your profile",
+  },
+  profiles: {
+    patient: "Patient",
+    doctor: "Doctor",
+    secretary: "Secretary",
+    patientDescription: "Schedule and track appointments",
+    doctorDescription: "Manage appointments and patients",
+    secretaryDescription: "Registration and scheduling",
+  },
+  home: {
+    hero: {
+      title: "Medical Appointment System",
+      subtitle:
+        "Connecting patients and healthcare professionals efficiently and securely",
+      ctaPrimary: "Schedule appointment",
+      ctaSecondary: "View upcoming appointments",
+    },
+    metrics: {
+      totalPatients: "Total Patients",
+      totalPatientsDescription:
+        "Total number of patients registered in the system",
+      activeDoctors: "Active Doctors",
+      activeDoctorsDescription: "Professionals available for care",
+      todayAppointments: "Today's Appointments",
+      todayAppointmentsDescription: "Appointments scheduled for today",
+      pendingAppointments: "Pending",
+      pendingAppointmentsDescription:
+        "Scheduled or confirmed appointments awaiting completion",
+    },
+    emptyStates: {
+      noPatients: "No patients registered",
+      noDoctors: "No doctors registered",
+      noAppointments: "No appointments scheduled",
+      registerPatient: "Register patient",
+      inviteDoctor: "Invite doctor",
+      scheduleAppointment: "Schedule appointment",
+    },
+    actionCards: {
+      scheduleAppointment: {
+        title: "Schedule Appointment",
+        description: "Book medical appointments quickly and easily",
+        cta: "Go to Scheduling",
+        ctaAriaLabel: "Go to appointment scheduling page",
+      },
+      doctorPanel: {
+        title: "Doctor Panel",
+        description: "Manage appointments, schedules and records",
+        cta: "Access Panel",
+        ctaAriaLabel: "Go to doctor panel",
+      },
+      patientManagement: {
+        title: "Patient Management",
+        description: "Register and manage patient information",
+        cta: "Access Registration",
+        ctaAriaLabel: "Go to patient registration area",
+      },
+    },
+    upcomingConsultations: {
+      title: "Upcoming Appointments",
+      empty: "No appointments scheduled",
+      viewAll: "View all appointments",
+      date: "Date",
+      time: "Time",
+      patient: "Patient",
+      doctor: "Doctor",
+      status: "Status",
+      statusScheduled: "Scheduled",
+      statusConfirmed: "Confirmed",
+      statusCompleted: "Completed",
+      statusCanceled: "Canceled",
+      statusMissed: "Missed",
+    },
+    errorLoadingStats: "Error loading statistics",
+  },
+  accessibility: {
+    reducedMotion: "Reduced motion preference detected",
+    highContrast: "High contrast",
+    largeText: "Large text",
+    darkMode: "Dark mode",
+  },
+};

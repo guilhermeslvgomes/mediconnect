@@ -1,0 +1,24 @@
+[build]
+  command = "pnpm build"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+
+[dev]
+  command = "npm run dev"
+  targetPort = 5173
+  port = 8888
+  autoLaunch = false
+  framework = "#custom"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Optional: control caching of static assets
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

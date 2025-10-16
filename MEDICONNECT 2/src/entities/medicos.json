@@ -1,0 +1,74 @@
+
+{
+  "name": "medicos",
+  "fields": [
+    {
+      "name": "nome",
+      "type": "string",
+      "required": true,
+      "title": "Nome Completo"
+    },
+    {
+      "name": "email",
+      "type": "string",
+      "required": true,
+      "title": "Email"
+    },
+    {
+      "name": "senha",
+      "type": "string",
+      "required": true,
+      "title": "Senha"
+    },
+    {
+      "name": "crm",
+      "type": "string",
+      "required": true,
+      "title": "CRM"
+    },
+    {
+      "name": "especialidade",
+      "type": "string",
+      "required": true,
+      "title": "Especialidade"
+    },
+    {
+      "name": "telefone",
+      "type": "string",
+      "required": true,
+      "title": "Telefone"
+    },
+    {
+      "name": "valorConsulta",
+      "type": "number",
+      "required": true,
+      "title": "Valor da Consulta"
+    },
+    {
+      "name": "horarioAtendimento",
+      "type": "object",
+      "title": "Horários de Atendimento"
+    },
+    {
+      "name": "observacoes",
+      "type": "string",
+      "title": "Observações"
+    },
+    {
+      "name": "ativo",
+      "type": "boolean",
+      "title": "Ativo",
+      "default": true
+    },
+    {
+      "name": "criadoEm",
+      "type": "string",
+      "title": "datetime"
+    },
+    {
+      "name": "atualizadoEm",
+      "type": "string",
+      "title": "datetime"
+    }
+  ]
+}

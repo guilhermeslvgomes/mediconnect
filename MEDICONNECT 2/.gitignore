@@ -1,0 +1,58 @@
+############################################################
+# Projeto MediConnect - Ignore Rules
+############################################################
+
+# Dependências
+node_modules/
+
+# Builds / Output
+dist/
+build/
+
+# Ambiente / Segredos
+.env
+.env.*.local
+.env.local
+.env.development.local
+.env.production.local
+.env.test.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+*.log
+
+# Editor / SO
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Coverage / Tests
+coverage/
+*.lcov
+
+# Cache ferramentas
+.eslintcache
+.tsbuildinfo
+*.tsbuildinfo
+
+# Netlify local folder
+.netlify
+
+# Storybook / Docs temporários
+storybook-static/
+
+# Tailwind JIT artifacts (se surgir)
+*.tailwind.config.js.timestamp
+
+# Puppeteer downloads (caso configurado)
+.local-chromium/
+
+# Lockfiles alternativos (se decidir usar apenas pnpm)
+package-lock.json
+yarn.lock
